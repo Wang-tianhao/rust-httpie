@@ -68,8 +68,11 @@ impl FromStr for KvPair {
         // 使用 = 进行 split，这会得到一个迭代器
         let mut split = s.split("=");
         if s.contains(":=") {
-            split= s.split(":=");
+            split = s.split(":=");
+        } else if s.contains(":") {
+            split = s.split(":");
         }
+
         let err = || anyhow!(format!("Failed to parse {}", s));
         Ok(Self {
             // 从迭代器中取第一个结果作为 key，迭代器返回 Some(T)/None
@@ -94,14 +97,21 @@ fn parse_url(s: &str) -> Result<String> {
 /// 处理 get 子命令
 async fn get(client: Client, args: &Get) -> Result<()> {
     let mut headers = HeaderMap::new();
+    let query: Vec<(&String, &String)> = args.query.iter().map(|x| (&(x.k), &(x.v))).collect();
     for header in args.header.iter() {
         //hard code header
         if header.k.to_lowercase() == "authorization" {
             headers.insert(AUTHORIZATION, header.v.parse()?);
         }
+
         // headers.insert(header, header.v.parse()?);
     }
-    let resp = client.get(&args.url).query(query) .headers(headers).send().await?;
+    let resp = client
+        .get(&args.url)
+        .query(&query)
+        .headers(headers)
+        .send()
+        .await?;
     print_resp(resp).await
 }
 
@@ -155,9 +165,7 @@ fn print_body(m: Option<Mime>, body: &str) {
             // jsonxf::Formatter::pretty_printer()
             print_syntect(&jsonxf::pretty_print(body).unwrap(), "json");
         }
-        Some(v) if v.subtype() == mime::HTML => {
-            print_syntect(body, "html")
-        }
+        Some(v) if v.subtype() == mime::HTML => print_syntect(body, "html"),
 
         // 其它 mime type，我们就直接输出
         _ => println!("{:?}, \r\n {}", m, body),
@@ -181,13 +189,11 @@ fn print_syntect(s: &str, ext: &str) {
 #[tokio::main]
 async fn main() -> Result<()> {
     let opts: Opts = Opts::parse();
-    let mut headers = header::HeaderMap::new();
+    let mut headers = HeaderMap::new();
     // 为我们的 http 客户端添加一些缺省的 HTTP 头
     headers.insert("X-POWERED-BY", "Rust".parse()?);
     headers.insert(header::USER_AGENT, "Rust Httpie".parse()?);
-    let client = reqwest::Client::builder()
-        .default_headers(headers)
-        .build()?;
+    let client = Client::builder().default_headers(headers).build()?;
     match opts.subcmd {
         SubCommand::Get(ref args) => get(client, args).await?,
         SubCommand::Post(ref args) => post(client, args).await?,
@@ -211,7 +217,7 @@ mod tests {
     fn parse_kv_pair_works() {
         assert!(parse_kv_pair("a").is_err());
         assert_eq!(
-            parse_kv_pair("a=1").unwrap(),
+            parse_kv_pair("a:1").unwrap(),
             KvPair {
                 k: "a".into(),
                 v: "1".into()
